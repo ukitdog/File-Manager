@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>File Helper</title>
+    <link rel="stylesheet" type="text/css" href="semantic/dist/semantic.min.css">
+    <script
+      src="https://code.jquery.com/jquery-3.1.1.min.js"
+      integrity="sha256-hVVnYaiADRTO2PzUGmuLJr8BLUSjGIZsDYGmIJLv2b8="
+      crossorigin="anonymous"></script>
+    <script src="semantic/dist/semantic.min.js"></script>
+</head>
+<body>
+    <div class="ui segment">
+        <form class="ui form">
+            <table class="ui celled table">
+                <thead>
+                    <tr class="center aligned">
+                        <th class="one wide"></th>
+                        <th class="nine wide">Directory</th>
+                        <th class="five wide">File Name</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class='warning'>Original</td>
+                        <td><input type="text" id="oD" /></td>
+                        <td><input type="text" id="oF" /></td>
+                    </tr>
+                    <tr>
+                        <td class='warning'>New</td>
+                        <td><input type="text" id="nD" /></td>
+                        <td><input type="text" id="nF" /></td>
+                    </tr>
+                </tbody>
+            </table>
+        </form>
+        <div class="ui divider"></div>
+            <button class="ui primary button" id="j-search">Search</button>
+            <div class="ui checkbox">
+                <input type="checkbox" id="j-subfolder">
+                <label>Include subfolder(s)</label>
+            </div>
+            <button class="ui primary button" id="j-delete">Delete</button>
+            <button class="ui primary button" id="j-rename">Rename</button>
+            <button class="ui primary button" id="j-export">Export</button>            
+            <button class="ui red button" id="j-clearAll">Clear All</button>
+        <div class='ui warning message' id="message" style='display: none'></div>
+        <table class="ui celled table" id='result'></table>
+    </div>  
+    <script>
+        const electron = require('electron');
+        const {ipcRenderer} = electron;
+        const fs = require('fs');
+        const path = require('path');
+        const os = require('os');
+
+        const COLOR = '#ff8080';
+
+        // Clear all input fields
+        const clearAllButton = document.getElementById('j-clearAll');
+        clearAllButton.addEventListener('click', function(e){
+            resetStyle();
+            clearFields();
+        })
+
+         // Search
+        const searchButton = document.getElementById('j-search');
+        searchButton.addEventListener('click', function(e)
+        {
+            resetStyle();
+
+            const oD = document.getElementById('oD');
+            const oDV = oD.value;
+            const oF = document.getElementById('oF');
+            const oFV = oF.value;
+
+            const recursive = document.getElementById('j-subfolder').checked;
+
+            if (checkEmpty(oD, oF))
+            {
+                let files = searchNew(oD, oF, recursive);
+                if (files.length > 0)
+                {
+                    files.forEach( file => output(`${file.i1}`, `${file.i2}`, `${file.i3}`));
+                }
+                else
+                {
+                    log('No file found');
+                }                
+            }            
+        });
+
+        // Delete
+        const deleteButton = document.getElementById('j-delete');
+        deleteButton.addEventListener('click', function(e)
+        {
+            resetStyle();
+
+            const oD = document.getElementById('oD');
+            const oDV = oD.value;
+            const oF = document.getElementById('oF');
+            const oFV = oF.value;
+
+            if (checkEmpty(oD, oF))
+            {
+                let files = searchNew(oD, oF);
+                files.forEach(function(file){
+                    fs.unlink(path.join(file.i2, file.i3), function(err) {
+                        if (err) { log(err); } 
+                        else { output('Deleted', `${file.i3}`, ''); }                        
+                    });
+                });
+            } 
+        });
+
+        // Rename / Move
+        const renameButton = document.getElementById('j-rename');
+        renameButton.addEventListener('click', function(e)
+        {
+            resetStyle();
+
+            const oD = document.getElementById('oD');
+            const oDV = oD.value;
+            const oF = document.getElementById('oF');
+            const oFV = oF.value;
+            const nD = document.getElementById('nD');
+            const nDV = nD.value;
+            const nF = document.getElementById('nF');
+            const nFV = nF.value;
+            if (checkEmpty(oD, oF, nD, nF))
+            {
+                let files = searchNew(oD, oF);
+                files.forEach(function(file){
+                    let newFileName = file.i3.replace(oFV, nFV);
+                    if (fs.existsSync(path.join(nDV, newFileName)))
+                    {
+                        log(`Cannot move ${path.join(oDV, file.i3)} to ${path.join(nDV, newFileName)}. File exists. `);
+                    }
+                    else
+                    {
+                        fs.rename(path.join(oDV, file.i3), path.join(nDV, newFileName), 
+                            function(err)
+                            {
+                                if (err) { log(err); } 
+                                else { output('Renamaed', `${file.i3}`, `${newFileName}`); }                        
+                            });
+                    }
+                }); 
+            }
+        });
+
+        // Export result to a file
+        const exportButton = document.getElementById('j-export');
+        exportButton.addEventListener('click', function(e){
+            resetStyle(true);
+
+            const nD = document.getElementById('nD');
+            const nDV = nD.value;
+            const nF = document.getElementById('nF');
+            const nFV = nF.value;
+            if (checkEmpty(nD, nF))
+            {
+                if (fs.existsSync(path.join(nDV, nFV)))
+                {
+                    log(`${path.join(nDV, nFV)} already exists. `);
+                }
+                else
+                {
+                    let writer = fs.createWriteStream(path.join(nDV, nFV));
+                    const trList = document.querySelectorAll('table#result tr');
+                    trList.forEach(function(tr){
+                        const tdList = tr.childNodes;
+                        tdList.forEach(function(td){
+                            if (td.tagName.toLowerCase() === 'td')
+                            {
+                                console.log(td.innerHTML);
+                                writer.write(td.innerHTML + ',', 'utf-8');
+                            }
+                        });
+                        writer.write(os.EOL, 'utf-8');
+                    });
+
+                    writer.end('');
+                    writer.on('finish', () => {
+                        log(`Export to ${nFV} completed. `);
+                    });
+                }
+            }
+        });
+
+        // Internal search function to support recursive search
+        function searchNew(oD, oF, recursive)
+        {
+            let result = [];
+
+            const oDV = oD.value;
+            const oFV = oF.value;
+
+            let files = fs.readdirSync(oDV).filter( file => isFolderOrValidFile(oDV, file));
+            files.forEach(function(file){
+                searchFile(oDV, file, oFV, result, (recursive !== undefined && recursive) ? true : false);
+            });
+
+            result.sort(function(a, b){
+                if (a.i1 === b.i1)
+                {
+                    if (a.i2 === b.i2)
+                    {
+                        return a.i3 === b.i3 ? 0 : (a.i3 < b.i3 ? -1 : 1);
+                    }
+                    else
+                    {
+                        return a.i2 < b.i2 ? -1 : 1;
+                    }
+                }
+                return a.i1 < b.i1 ? -1 : 1;
+            })
+            return result;
+        }
+
+        // Internal recursive function to check a file or a folder (and go to its subfolders)
+        function searchFile(oDV, oFV, searchString, result, isRecursive)
+        {
+            let stat = fs.lstatSync(path.join(oDV, oFV));
+
+            if (oFV.toLowerCase().indexOf(searchString.toLowerCase()) !== -1)
+            {
+                result.push({i1: `${stat.isDirectory() ? 'Directory' : 'File'}`, i2: `${oDV}`, i3: `${oFV}`});
+            }
+            
+            if (!isRecursive || stat.isFile())
+            {
+                return;
+            }
+            else if (stat.isDirectory())
+            {
+                const newDir = path.join(oDV, oFV);
+                let files = fs.readdirSync(newDir).filter( file => isFolderOrValidFile(newDir, file));
+                files.forEach( file => searchFile(newDir, file, searchString, result));
+            }
+        }
+
+        // TODO: function for further filtering
+        function isFolderOrValidFile(folder, fileName)
+        {
+            return true;
+        }
+
+        function log(message)
+        {
+            const messageDiv = document.getElementById('message');
+            messageDiv.innerHTML = message;
+            messageDiv.style.removeProperty('display');
+        }
+
+        function output(i1, i2, i3)
+        {
+            const messageTable = document.getElementById('result');
+            const tr = document.createElement('tr');
+            const td1 = document.createElement('td');
+            td1.innerHTML = i1;
+            tr.appendChild(td1);
+            const td2 = document.createElement('td');
+            td2.innerHTML = i2;
+            tr.appendChild(td2);
+            const td3 = document.createElement('td');
+            td3.innerHTML = i3;
+            tr.appendChild(td3);
+            messageTable.appendChild(tr);
+        }
+
+        function clearLog()
+        {
+            const messageDiv = document.getElementById('message');
+            messageDiv.style.display = 'none';
+            messageDiv.innerHTML = '';
+        }
+
+        function clearResult()
+        {
+            const resultList = document.getElementById('result');
+            resultList.innerHTML = '';
+        }
+
+        function logError()
+        {
+            log('Highlighted field(s) must not be empty');
+        }
+
+        function checkEmpty(...elements)
+        {
+            let result = true;
+            elements.forEach(
+                function(element)
+                {
+                    let value = element.value;
+                    if (!value)
+                    {
+                        setStyle(element.id, COLOR);
+                        result = false;
+                    }
+                }
+            );
+            if (!result)
+            {
+                logError();
+            }
+            return result;
+        }
+
+        function setStyle(elementId, color)
+        {
+            const element = document.getElementById(elementId);
+            element.style.background = color;
+        }
+
+        function resetStyle(keepResult)
+        {
+            setStyle('oD', 'white');
+            setStyle('oF', 'white');
+            setStyle('nD', 'white');
+            setStyle('nF', 'white');
+
+            clearLog();
+
+            if (keepResult === undefined || !keepResult)
+            {
+                clearResult();
+            }
+        }
+
+        function clearFields()
+        {
+            let inputs = document.querySelectorAll('input[type="text"]');
+            inputs.forEach( input => input.value = '' );
+
+            let checkboxes = document.querySelectorAll('input[type="checkbox"]');
+            checkboxes.forEach( checkbox => checkbox.checked = false );
+        }
+
+        ipcRenderer.on('item:search', function(e, item){
+            const searchButton = document.getElementById('j-search');
+            searchButton.click();
+        });
+
+        ipcRenderer.on('item:delete', function(e, item){
+            const deleteButton = document.getElementById('j-delete');
+            deleteButton.click();
+        });
+    </script>
+</body>
+</html>
