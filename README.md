@@ -9,8 +9,15 @@ Features:
 4. Export search result to a text file (in csv format)
 5. Contains keyboard shortcuts to search and delete. (Not for rename since we need to click for input anyway)
 
+# Build aud Run
+Simply run command "npm run package-[win|linux|mac]" then a executables will be placed in release-builds folder
+
+# Usage
+The interface should be intuitive enough. After all, missing fields will be highlighted so you will know
+
 # To-Do
 As my first Node / JS projects, there are many places to improve:
 1. Better way to enter directory address, instead of manually like now
 2. Better shortcuts system so we do not need to click anything
 3. More file functionalities, basically :-)
+
